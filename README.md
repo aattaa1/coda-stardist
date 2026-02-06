@@ -181,11 +181,7 @@ Your_Image_Directory/
 │   └── feature_mat/
 │       ├── image1.mat           # Features + pixel resolution
 │       └── image2.mat
-│
-└── segmentation_analysis/
-    └── pix_res_info/
-        ├── image1.mat
-        └── image2.mat
+
 ```
 
 ---
