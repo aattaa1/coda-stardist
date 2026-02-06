@@ -49,12 +49,17 @@ A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide 
 - NVIDIA GPU with CUDA support (recommended)
 - NVIDIA Driver 450.x or higher
 
-### Step 1: Clone the Repository
+### Step 1: Clone the Repository or Download As zip folder
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/stardist-pipeline.git
-cd stardist-pipeline
+git clone https://github.com/YOUR_USERNAME/coda-stardist.git
+cd coda-stardist
 ```
+
+or
+
+1. Click the green "<> Code" button
+2. Click "Download ZIP"
 
 ### Step 2: Create Conda Environment
 
