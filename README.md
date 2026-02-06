@@ -3,7 +3,6 @@
 
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-3100/)
 [![TensorFlow 2.10](https://img.shields.io/badge/tensorflow-2.10-orange.svg)](https://www.tensorflow.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide Images (WSIs) and image tiles using [StarDist](https://github.com/stardist/stardist). Designed for computational pathology workflows with outputs compatible with [QuPath](https://qupath.github.io/) and MATLAB.
 
