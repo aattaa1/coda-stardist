@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+eggs/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data files (don't upload large files)
+*.ndpi
+*.svs
+*.tif
+*.tiff
+*.mat
+*.pkl
+*.h5
+*.hdf5
+
+# Model files
+models/
+*.weights
+
+# Output directories
+**/geojsons/
+**/feature_pickles/
+**/feature_mat/
+**/stardist_masks/
+**/pix_res_info/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
