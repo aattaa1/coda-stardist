@@ -1,14 +1,14 @@
 
 # StarDist Nuclear Segmentation Pipeline
 
-[![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-3100/)
+[![Python 3.10.19](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-31019/)
 [![TensorFlow 2.10](https://img.shields.io/badge/tensorflow-2.10-orange.svg)](https://www.tensorflow.org/)
 
 A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide Images (WSIs) and image tiles using [StarDist](https://github.com/stardist/stardist). Designed for computational pathology workflows with outputs compatible with [QuPath](https://qupath.github.io/) and MATLAB.
 
 ---
 
-## ✨ Features
+## Features
 
 - **Efficient Segmentation**: Uses StarDist's `predict_instances_big()` for memory-efficient processing of large WSIs
 - **Automatic Method Selection**: Intelligently switches between methods based on image size
@@ -21,7 +21,7 @@ A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide 
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Installation](#-installation)
 - [Quick Start](#-quick-start)
@@ -39,7 +39,7 @@ A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide 
 
 ---
 
-## 🔧 Installation
+## Installation
 
 ### Prerequisites
 
@@ -102,7 +102,7 @@ STARDIST PIPELINE - INSTALLATION VERIFICATION
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Segment Images
 
@@ -133,7 +133,7 @@ python training/run_training.py
 
 ---
 
-## 📖 Usage
+## Usage
 
 ### Segmentation Pipeline
 
@@ -279,7 +279,7 @@ stats = process_image_directory(
 
 ---
 
-## 📁 Output Files
+## Output Files
 
 | File Type | Extension | Description | Software |
 |-----------|-----------|-------------|----------|
@@ -500,7 +500,7 @@ Where $c \in \{R, G, B\}$ represents the color channel.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 stardist-pipeline/
@@ -527,7 +527,7 @@ stardist-pipeline/
 
 ---
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### GPU Not Detected
 
@@ -583,7 +583,7 @@ The pipeline automatically handles small images (<2000×2000 pixels) by using `p
 
 ---
 
-## 📚 Citation
+## Citation
 
 If you use this pipeline in your research, please cite:
 
@@ -616,7 +616,7 @@ Also cite the original StarDist papers:
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [StarDist](https://github.com/stardist/stardist) - Original segmentation method
 - [CSBDeep](https://github.com/CSBDeep/CSBDeep) - Deep learning framework
@@ -626,7 +626,7 @@ Also cite the original StarDist papers:
 
 ---
 
-## 📧 Contact
+## Contact
 
 **Your Name**  
 Email: aattaa1@jh.edu  
@@ -635,5 +635,5 @@ Lab: [Kiemen Lab](https://labs.pathology.jhu.edu/kiemen/)
 ---
 
 <p align="center">
-  Made with ❤️ for computational pathology
+  Made with 💛 for computational pathology purposes
 </p>
