@@ -1,15 +1,14 @@
 
 # StarDist Nuclear Segmentation Pipeline
 
-[![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-3100/)
+[![Python 3.10.19](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-31019/)
 [![TensorFlow 2.10](https://img.shields.io/badge/tensorflow-2.10-orange.svg)](https://www.tensorflow.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide Images (WSIs) and image tiles using [StarDist](https://github.com/stardist/stardist). Designed for computational pathology workflows with outputs compatible with [QuPath](https://qupath.github.io/) and MATLAB.
 
 ---
 
-## ✨ Features
+## Features
 
 - **Efficient Segmentation**: Uses StarDist's `predict_instances_big()` for memory-efficient processing of large WSIs
 - **Automatic Method Selection**: Intelligently switches between methods based on image size
@@ -22,7 +21,7 @@ A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide 
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Installation](#-installation)
 - [Quick Start](#-quick-start)
@@ -36,12 +35,11 @@ A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide 
 - [Project Structure](#-project-structure)
 - [Troubleshooting](#-troubleshooting)
 - [Citation](#-citation)
-- [License](#-license)
 - [Acknowledgments](#-acknowledgments)
 
 ---
 
-## 🔧 Installation
+## Installation
 
 ### Prerequisites
 
@@ -49,12 +47,17 @@ A streamlined, GPU-accelerated pipeline for nuclear segmentation of Whole Slide 
 - NVIDIA GPU with CUDA support (recommended)
 - NVIDIA Driver 450.x or higher
 
-### Step 1: Clone the Repository
+### Step 1: Clone the Repository or Download As zip folder
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/stardist-pipeline.git
-cd stardist-pipeline
+git clone https://github.com/YOUR_USERNAME/coda-stardist.git
+cd coda-stardist
 ```
+
+or
+
+1. Click the green "<> Code" button
+2. Click "Download ZIP"
 
 ### Step 2: Create Conda Environment
 
@@ -99,7 +102,7 @@ STARDIST PIPELINE - INSTALLATION VERIFICATION
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Segment Images
 
@@ -108,35 +111,35 @@ STARDIST PIPELINE - INSTALLATION VERIFICATION
 conda activate coda-stardist
 
 # Edit configuration with your paths
-# Open segmentation/run_pipeline.py and set:
+# Open apply_stardist.py and set:
 #   WSI_PATHS = [r'path/to/your/images']
 #   MODEL_PATH = r'path/to/your/model'
 
 # Run segmentation
-python segmentation/run_pipeline.py
+python apply_stardist.py
 ```
 
 ### 2. Train a Model (Optional)
 
 ```bash
 # Edit configuration with your paths
-# Open training/run_training.py and set:
+# Open train_stardist.py and set:
 #   DATA_DIR = r'path/to/training/data'
 #   MODEL_NAME = 'My_Model'
 
 # Run training
-python training/run_training.py
+python train_stardist.py
 ```
 
 ---
 
-## 📖 Usage
+## Usage
 
 ### Segmentation Pipeline
 
 #### Configuration
 
-Edit `segmentation/run_pipeline.py`:
+Edit `apply_stardist.py`:
 
 ```python
 # Input directories containing WSIs or image tiles
@@ -159,7 +162,7 @@ GEOJSON_EVERY_N = 50          # Generate GeoJSON every N images
 
 ```bash
 conda activate stardist_pipeline
-python segmentation/run_pipeline.py
+python apply_stardist.py
 ```
 
 #### Output Structure
@@ -169,20 +172,16 @@ Your_Image_Directory/
 ├── image1.ndpi
 ├── image2.ndpi
 │
-├── StarDist_06_15_2025_ModelName/
+├── StarDist_##_##_202#_ModelName/
 │   ├── geojsons/
-│   │   └── image50.geojson      # Every Nth image
+│   │   └── imageN.geojson      # Every Nth image
 │   ├── feature_pickles/
-│   │   ├── image1.pkl           # Every image
+│   │   ├── image1.pkl           # Features + pixel resolution for python inference
 │   │   └── image2.pkl
 │   └── feature_mat/
-│       ├── image1.mat           # Features + pixel resolution
+│       ├── image1.mat           # Features + pixel resolution for matlab inference
 │       └── image2.mat
-│
-└── segmentation_analysis/
-    └── pix_res_info/
-        ├── image1.mat
-        └── image2.mat
+
 ```
 
 ---
@@ -220,7 +219,7 @@ GeoJSON annotation format:
 
 #### Configuration
 
-Edit `training/run_training.py`:
+Edit `train_stardist.py`:
 
 ```python
 DATA_DIR = r"Z:\Path\To\Training\Data"
@@ -237,7 +236,7 @@ USE_PRETRAINED = True  # Start from pretrained weights (recommended)
 
 ```bash
 conda activate stardist_pipeline
-python training/run_training.py
+python train_stardist.py
 ```
 
 ---
@@ -280,7 +279,7 @@ stats = process_image_directory(
 
 ---
 
-## 📁 Output Files
+## Output Files
 
 | File Type | Extension | Description | Software |
 |-----------|-----------|-------------|----------|
@@ -338,7 +337,7 @@ The pipeline extracts **26 nuclear morphology and intensity features** for each 
 | **Radius** | maximum_radius, mean_radius, median_radius | 3 |
 | **Axis** | minor_axis_length, major_axis_length, orientation_degrees | 3 |
 | **Intensity** | r_mean_intensity, g_mean_intensity, b_mean_intensity, r_std, g_std, b_std | 6 |
-| **Metadata** | slide_num | 1 |
+| **Metadata** | slide_num, label_id | 2 |
 
 ---
 
@@ -501,23 +500,24 @@ Where $c \in \{R, G, B\}$ represents the color channel.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 stardist-pipeline/
 │
 ├── README.md                 # This file
-├── LICENSE                   # MIT License
+|── train_stardist.py       # Training execution script
+|── apply_stardist.py       # Segmentation execution script
 ├── environment.yml           # Conda environment (all dependencies)
 ├── requirements.txt          # Pip dependencies (alternative)
 │
 ├── segmentation/
 │   ├── stardist_functions.py # Core segmentation functions
-│   └── run_pipeline.py       # Segmentation execution script
+│  
 │
 ├── training/
 │   ├── stardist_training.py  # Core training functions
-│   └── run_training.py       # Training execution script
+│   
 │
 ├── utilities/
 │   └── verify_installation.py # Installation checker
@@ -528,7 +528,7 @@ stardist-pipeline/
 
 ---
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### GPU Not Detected
 
@@ -558,7 +558,7 @@ BLOCK_SIZE = 2048  # Reduce from 4096
 
 **Solution:** Reinstall OpenSlide packages:
 ```bash
-conda activate stardist_pipeline
+conda activate coda-stardist
 pip uninstall openslide-python openslide-bin
 pip install openslide-bin openslide-python
 ```
@@ -584,16 +584,16 @@ The pipeline automatically handles small images (<2000×2000 pixels) by using `p
 
 ---
 
-## 📚 Citation
+## Citation
 
 If you use this pipeline in your research, please cite:
 
 ```bibtex
 @software{stardist_pipeline,
-  author = {Your Name},
+  author = {Ali Attaa},
   title = {StarDist Nuclear Segmentation Pipeline},
-  year = {2025},
-  url = {https://github.com/YOUR_USERNAME/stardist-pipeline}
+  year = {2026},
+  url = {https://github.com/aattaa1/coda-stardist}
 }
 ```
 
@@ -617,37 +617,7 @@ Also cite the original StarDist papers:
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-```
-MIT License
-
-Copyright (c) 2025 Your Name
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [StarDist](https://github.com/stardist/stardist) - Original segmentation method
 - [CSBDeep](https://github.com/CSBDeep/CSBDeep) - Deep learning framework
@@ -657,7 +627,7 @@ SOFTWARE.
 
 ---
 
-## 📧 Contact
+## Contact
 
 **Your Name**  
 Email: aattaa1@jh.edu  
@@ -666,5 +636,5 @@ Lab: [Kiemen Lab](https://labs.pathology.jhu.edu/kiemen/)
 ---
 
 <p align="center">
-  Made with ❤️ for computational pathology
+  Made with 💛 for computational pathology purposes
 </p>
