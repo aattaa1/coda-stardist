@@ -111,24 +111,24 @@ STARDIST PIPELINE - INSTALLATION VERIFICATION
 conda activate coda-stardist
 
 # Edit configuration with your paths
-# Open segmentation/run_pipeline.py and set:
+# Open apply_stardist.py and set:
 #   WSI_PATHS = [r'path/to/your/images']
 #   MODEL_PATH = r'path/to/your/model'
 
 # Run segmentation
-python segmentation/run_pipeline.py
+python apply_stardist.py
 ```
 
 ### 2. Train a Model (Optional)
 
 ```bash
 # Edit configuration with your paths
-# Open training/run_training.py and set:
+# Open train_stardist.py and set:
 #   DATA_DIR = r'path/to/training/data'
 #   MODEL_NAME = 'My_Model'
 
 # Run training
-python training/run_training.py
+python train_stardist.py
 ```
 
 ---
@@ -139,7 +139,7 @@ python training/run_training.py
 
 #### Configuration
 
-Edit `segmentation/run_pipeline.py`:
+Edit `apply_stardist.py`:
 
 ```python
 # Input directories containing WSIs or image tiles
@@ -162,7 +162,7 @@ GEOJSON_EVERY_N = 50          # Generate GeoJSON every N images
 
 ```bash
 conda activate stardist_pipeline
-python segmentation/run_pipeline.py
+python apply_stardist.py
 ```
 
 #### Output Structure
@@ -172,14 +172,14 @@ Your_Image_Directory/
 ├── image1.ndpi
 ├── image2.ndpi
 │
-├── StarDist_06_15_2025_ModelName/
+├── StarDist_##_##_202#_ModelName/
 │   ├── geojsons/
-│   │   └── image50.geojson      # Every Nth image
+│   │   └── imageN.geojson      # Every Nth image
 │   ├── feature_pickles/
-│   │   ├── image1.pkl           # Every image
+│   │   ├── image1.pkl           # Features + pixel resolution for python inference
 │   │   └── image2.pkl
 │   └── feature_mat/
-│       ├── image1.mat           # Features + pixel resolution
+│       ├── image1.mat           # Features + pixel resolution for matlab inference
 │       └── image2.mat
 
 ```
@@ -219,7 +219,7 @@ GeoJSON annotation format:
 
 #### Configuration
 
-Edit `training/run_training.py`:
+Edit `train_stardist.py`:
 
 ```python
 DATA_DIR = r"Z:\Path\To\Training\Data"
@@ -236,7 +236,7 @@ USE_PRETRAINED = True  # Start from pretrained weights (recommended)
 
 ```bash
 conda activate stardist_pipeline
-python training/run_training.py
+python train_stardist.py
 ```
 
 ---
@@ -337,7 +337,7 @@ The pipeline extracts **26 nuclear morphology and intensity features** for each 
 | **Radius** | maximum_radius, mean_radius, median_radius | 3 |
 | **Axis** | minor_axis_length, major_axis_length, orientation_degrees | 3 |
 | **Intensity** | r_mean_intensity, g_mean_intensity, b_mean_intensity, r_std, g_std, b_std | 6 |
-| **Metadata** | slide_num | 1 |
+| **Metadata** | slide_num, label_id | 2 |
 
 ---
 
@@ -506,17 +506,18 @@ Where $c \in \{R, G, B\}$ represents the color channel.
 stardist-pipeline/
 │
 ├── README.md                 # This file
-├── LICENSE                   # MIT License
+|── train_stardist.py       # Training execution script
+|── apply_stardist.py       # Segmentation execution script
 ├── environment.yml           # Conda environment (all dependencies)
 ├── requirements.txt          # Pip dependencies (alternative)
 │
 ├── segmentation/
 │   ├── stardist_functions.py # Core segmentation functions
-│   └── run_pipeline.py       # Segmentation execution script
+│  
 │
 ├── training/
 │   ├── stardist_training.py  # Core training functions
-│   └── run_training.py       # Training execution script
+│   
 │
 ├── utilities/
 │   └── verify_installation.py # Installation checker
@@ -557,7 +558,7 @@ BLOCK_SIZE = 2048  # Reduce from 4096
 
 **Solution:** Reinstall OpenSlide packages:
 ```bash
-conda activate stardist_pipeline
+conda activate coda-stardist
 pip uninstall openslide-python openslide-bin
 pip install openslide-bin openslide-python
 ```
