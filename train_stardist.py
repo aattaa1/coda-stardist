@@ -18,6 +18,7 @@ from training.training_functions import (
 )
 import os
 
+from stardist.models import StarDist2D, Config2D
 # Set environment variable before importing TensorFlow
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -29,40 +30,41 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # ============================================================
 
 # GPU Environment (Windows only - set to your conda env path)
-CONDA_ENV_PATH = r"C:\Users\YOUR_USERNAME\miniconda3\envs\stardist_pipeline"
+CONDA_ENV_PATH = r"C:\Users\aattaa1\AppData\Local\miniconda3\envs\coda-stardist"
 
 # Training data directory
-# Expected structure:
-#   DATA_DIR/
-#       image1.tif
-#       image1.geojson
-#       image2.tif
-#       image2.geojson
-#       ...
-DATA_DIR = r"Z:\Your\Training\Data\Directory"
+DATA_DIR = r"Z:\Yu Shen\Wen-Chen Chen\nuclear segmentation\qupath annotations from AK\Qupath project\ground_truth"
 
 # Model output settings
-MODEL_NAME = "My_Custom_Model"
-MODEL_BASEDIR = r"Z:\Your\Models\Directory"
+MODEL_NAME = "wcc_02_24_2026_96_nrays"
+MODEL_BASEDIR = r"\\10.99.134.183\kiemen-lab-data\Ali Attaa\nuclear segmentation\stardist models"
 
 # Data settings
-IMG_EXT = ".tif"  # Image file extension
-MIN_NUCLEUS_AREA = 20  # Minimum nucleus area (pixels) to include
-VALIDATION_SPLIT = 0.2  # Fraction of data for validation
+IMG_EXT = ".tif"
+MIN_NUCLEUS_AREA = 20
+VALIDATION_SPLIT = 0.2
 
 # Training settings
-EPOCHS = 400  # Number of training epochs
-STEPS_PER_EPOCH = 200  # Steps per epoch
-PATCH_SIZE = (256, 256)  # Training patch size
-USE_AUGMENTATION = True  # Use data augmentation
+EPOCHS = 450
+STEPS_PER_EPOCH = 200
+PATCH_SIZE = (256, 256)
+USE_AUGMENTATION = True
 
-# Model initialization
-USE_PRETRAINED = True  # Start from pretrained weights (recommended)
-PRETRAINED_MODEL = "HCC_HE_Finetuned"  # Pretrained model to use
+# Model parameters (None = use pretrained defaults)
+N_RAYS = 96  # Change to 96, 64, 32, etc. (None = use pretrained)
+GRID = (2, 2)  # Change if needed (None = use pretrained)
+COPY_WEIGHTS = False
+USE_PRETRAINED = True
+
+# Set FINETUNED_MODEL_PATH = None to use built-in model
+PRETRAINED_MODEL = '2D_versatile_he'
+
+# Your custom trained model path (set to None to use built-in model above)
+FINETUNED_MODEL_PATH = None
 
 # Output options
-VISUALIZE = True  # Show/save visualizations
-EXPORT_MODEL = True  # Export for TensorFlow Serving
+VISUALIZE = True
+EXPORT_MODEL = True
 
 
 # ============================================================
@@ -82,7 +84,7 @@ def main():
 
     # Verify data directory exists
     if not os.path.exists(DATA_DIR):
-        print(f"\n❌ Data directory not found: {DATA_DIR}")
+        print(f"\n Data directory not found: {DATA_DIR}")
         return
 
     # Setup GPU environment (Windows)
@@ -112,15 +114,18 @@ def main():
             use_augmentation=USE_AUGMENTATION,
             use_pretrained=USE_PRETRAINED,
             pretrained_model=PRETRAINED_MODEL,
+            n_rays=N_RAYS,
+            grid=GRID,
+            copy_weights=COPY_WEIGHTS,
             visualize=VISUALIZE,
             export=EXPORT_MODEL
         )
 
-        print("\n✅ Training completed successfully!")
+        print("\n Training completed")
         print(f"   Model saved to: {os.path.join(MODEL_BASEDIR, MODEL_NAME)}")
 
     except Exception as e:
-        print(f"\n❌ Training failed: {e}")
+        print(f"\n Training failed: {e}")
         import traceback
         traceback.print_exc()
 

@@ -53,3 +53,7 @@ Thumbs.db
 
 # Logs
 *.log
+mvi_det.py
+extract_roi_coda.py
+extract_region.py
+segmentation/segmentation_functions_depr.py

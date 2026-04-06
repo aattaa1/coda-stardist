@@ -56,21 +56,21 @@ def check_gpu() -> bool:
     gpus = tf.config.list_physical_devices('GPU')
 
     if gpus:
-        print(f"✅ Found {len(gpus)} GPU(s):")
+        print(f" Found {len(gpus)} GPU(s):")
         for i, gpu in enumerate(gpus):
             print(f"   GPU {i}: {gpu.name}")
 
         try:
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
-            print("✅ Memory growth enabled")
+            print(" Memory growth enabled")
         except RuntimeError as e:
-            print(f"⚠️ Could not set memory growth: {e}")
+            print(f"Could not set memory growth: {e}")
 
         print(f"\nTensorFlow version: {tf.__version__}")
         print(f"Built with CUDA: {tf.test.is_built_with_cuda()}")
     else:
-        print("❌ No GPU found - training will be slow!")
+        print(" No GPU found - training will be slow!")
 
     print("=" * 60)
     return len(gpus) > 0
@@ -93,20 +93,39 @@ def create_augmenter() -> Callable:
     Returns:
         Augmentation function compatible with StarDist training
     """
-    aug = Augmend()
-    aug.add([FlipRot90(axis=(0, 1)), FlipRot90(axis=(0, 1))])
-    aug.add([
-        Elastic(grid=5, amount=10, order=1, axis=(0, 1)),
-        Elastic(grid=5, amount=10, order=0, axis=(0, 1))
-    ])
-    aug.add([
-        IntensityScaleShift(scale=(0.8, 1.2), shift=(-0.1, 0.1)),
-        lambda x: x  # Identity for mask
-    ])
+    from stardist.models import StarDist2D
 
+    # Use StarDist's built-in augmenter instead of custom augmend
     def augmenter(x, y):
         """Apply augmentation to image and mask pair."""
-        return aug([x, y])
+        import numpy as np
+
+        # Random flip (horizontal)
+        if np.random.rand() > 0.5:
+            x = np.flip(x, axis=1)
+            y = np.flip(y, axis=1)
+
+        # Random flip (vertical)
+        if np.random.rand() > 0.5:
+            x = np.flip(x, axis=0)
+            y = np.flip(y, axis=0)
+
+        # Random 90-degree rotation
+        k = np.random.randint(0, 4)
+        x = np.rot90(x, k, axes=(0, 1))
+        y = np.rot90(y, k, axes=(0, 1))
+
+        # Random intensity scaling (only for image, not mask)
+        scale = np.random.uniform(0.8, 1.2)
+        shift = np.random.uniform(-0.1, 0.1)
+        x = x * scale + shift
+        x = np.clip(x, 0, 1)
+
+        # Ensure contiguous arrays
+        x = np.ascontiguousarray(x)
+        y = np.ascontiguousarray(y)
+
+        return x, y
 
     return augmenter
 
@@ -165,7 +184,7 @@ def geojson_to_instance_mask(geojson_path: str, img_shape: Tuple[int, int],
     elif isinstance(data, list):
         features = data
     else:
-        print(f"  ⚠️ Unknown GeoJSON structure in {geojson_path}")
+        print(f" Unknown GeoJSON structure in {geojson_path}")
         return mask
 
     label_id = 1
@@ -271,7 +290,7 @@ def load_training_data(data_dir: str, img_ext: str = '.tif',
     x = np.array(x)
     y = np.array(y)
 
-    print(f"\n✅ Loaded {len(x)} training samples")
+    print(f"\nLoaded {len(x)} training samples")
     print(f"   Images shape: {x.shape}")
     print(f"   Labels shape: {y.shape}")
 
@@ -397,21 +416,22 @@ def plot_training_history(history: Dict, save_path: str = None) -> None:
 
     plt.close()
 
-
 # ============================================================
 # MODEL CREATION
 # ============================================================
 
 def create_model_from_pretrained(model_name: str, model_basedir: str,
-                                 pretrained_model: str = "2D_versatile_he",
+                                 pretrained_model: str = None,
+                                 finetuned_model_path: str = None,
                                  patch_size: Tuple[int, int] = (256, 256)) -> StarDist2D:
     """
     Create a new StarDist model initialized with pretrained weights.
 
     Args:
         model_name: Name for the new model
-        model_basedir: Base directory to save model
-        pretrained_model: Name of pretrained model to load
+        model_basedir: Base directory to save new model
+        pretrained_model: Name of built-in pretrained model (e.g., "2D_versatile_he")
+        finetuned_model_path: Path to custom pretrained model folder (overrides pretrained_model)
         patch_size: Training patch size
 
     Returns:
@@ -419,34 +439,109 @@ def create_model_from_pretrained(model_name: str, model_basedir: str,
     """
     print(f"Creating model: {model_name}")
     print(f"  Base directory: {model_basedir}")
-    print(f"  Pretrained model: {pretrained_model}")
 
     os.makedirs(model_basedir, exist_ok=True)
 
     # Load pretrained model
     print("  Loading pretrained weights...")
-    pretrained = StarDist2D.from_pretrained(pretrained_model)
 
-    # Get and modify config
+    if finetuned_model_path is not None:
+        # Load custom trained model
+        print(f"  Custom model path: {finetuned_model_path}")
+        pretrained = StarDist2D(None, name=os.path.basename(finetuned_model_path),
+                                basedir=os.path.dirname(finetuned_model_path))
+    else:
+        # Load built-in pretrained model
+        print(f"  Built-in model: {pretrained_model}")
+        pretrained = StarDist2D.from_pretrained(pretrained_model)
+
+    # Get and modify config from pretrained model
     conf = pretrained.config
     conf.train_patch_size = patch_size
 
-    # Create new model
+    # Create new model WITH the config (not None!)
+    print(f"  Creating new model with pretrained config...")
     model = StarDist2D(conf, name=model_name, basedir=model_basedir)
 
-    # Copy pretrained weights
+    # Copy pretrained weights to new model
+    print(f"  Copying weights to new model...")
     model.keras_model.set_weights(pretrained.keras_model.get_weights())
 
-    print(f"  ✅ Model created successfully")
+    print(f"  Model created successfully")
     print(f"  Patch size: {patch_size}")
 
     return model
 
 
+def create_model_from_pretrained_mod(model_name: str, model_basedir: str,
+                                 pretrained_model: str = "2D_versatile_he",
+                                 custom_model_path: str = None,
+                                 n_rays: int = None,
+                                 grid: Tuple[int, int] = None,
+                                 patch_size: Tuple[int, int] = (256, 256),
+                                 copy_weights: bool = True) -> StarDist2D:
+    """
+    Create a new StarDist model initialized with pretrained weights.
+
+    Args:
+        copy_weights: If False, don't copy weights (use when changing n_rays/grid)
+    """
+    print(f"Creating model: {model_name}")
+    print(f"  Base directory: {model_basedir}")
+
+    os.makedirs(model_basedir, exist_ok=True)
+
+    # Load pretrained model
+    print("  Loading pretrained model...")
+
+    if custom_model_path is not None:
+        print(f"  Custom model path: {custom_model_path}")
+        pretrained = StarDist2D(None, name=os.path.basename(custom_model_path),
+                                basedir=os.path.dirname(custom_model_path))
+    else:
+        print(f"  Built-in model: {pretrained_model}")
+        pretrained = StarDist2D.from_pretrained(pretrained_model)
+
+    # Get config from pretrained model
+    conf = pretrained.config
+
+    # Modify config if custom parameters provided
+    if n_rays is not None:
+        print(f"  Modifying n_rays: {conf.n_rays} → {n_rays}")
+        conf.n_rays = n_rays
+        copy_weights = False  # Can't copy weights if architecture changes
+
+    if grid is not None:
+        print(f"  Modifying grid: {conf.grid} → {grid}")
+        conf.grid = grid
+        copy_weights = False  # Can't copy weights if architecture changes
+
+    # Update patch size
+    conf.train_patch_size = patch_size
+
+    # Create new model with (possibly modified) config
+    print(f"  Creating new model with config...")
+    model = StarDist2D(conf, name=model_name, basedir=model_basedir)
+
+    # Copy pretrained weights ONLY if architecture is the same
+    if copy_weights:
+        print(f"  Copying weights from pretrained model...")
+        model.keras_model.set_weights(pretrained.keras_model.get_weights())
+        print(f"   Weights copied")
+    else:
+        print(f"  Architecture changed - weights NOT copied (training from scratch)")
+
+    print(f"  Model created successfully")
+    print(f"  n_rays: {model.config.n_rays}")
+    print(f"  grid: {model.config.grid}")
+    print(f"  Patch size: {patch_size}")
+
+    return model
+
 def create_model_from_scratch(model_name: str, model_basedir: str,
                               n_channels: int = 3,
                               patch_size: Tuple[int, int] = (256, 256),
-                              n_rays: int = 32,
+                              n_rays: int = 96,
                               grid: Tuple[int, int] = (2, 2)) -> StarDist2D:
     """
     Create a new StarDist model from scratch.
@@ -476,7 +571,7 @@ def create_model_from_scratch(model_name: str, model_basedir: str,
 
     model = StarDist2D(conf, name=model_name, basedir=model_basedir)
 
-    print(f"  ✅ Model created successfully")
+    print(f" Model created")
     print(f"  Channels: {n_channels}")
     print(f"  Rays: {n_rays}")
     print(f"  Grid: {grid}")
@@ -535,7 +630,7 @@ def train_model(model: StarDist2D,
         steps_per_epoch=steps_per_epoch
     )
 
-    print("\n✅ Training complete!")
+    print("\n Training complete")
 
     return history.history if hasattr(history, 'history') else {}
 
@@ -573,9 +668,9 @@ def export_model(model: StarDist2D) -> None:
 
     try:
         model.export_TF()
-        print("  ✅ Model exported successfully")
+        print(" Model exported")
     except Exception as e:
-        print(f"  ⚠️ Export failed: {e}")
+        print(f"  Export failed: {e}")
 
 
 # ============================================================
@@ -593,7 +688,11 @@ def run_training_pipeline(data_dir: str,
                           patch_size: Tuple[int, int] = (256, 256),
                           use_augmentation: bool = True,
                           use_pretrained: bool = True,
-                          pretrained_model: str = "2D_versatile_he",
+                          pretrained_model: str = None,
+                          finetuned_model_path: str = None,
+                          n_rays: int = 96,
+                          grid: Tuple[int, int] = None,
+                          copy_weights: bool = True,
                           visualize: bool = True,
                           export: bool = True) -> StarDist2D:
     """
@@ -665,17 +764,21 @@ def run_training_pipeline(data_dir: str,
     print("-" * 50)
 
     if use_pretrained:
-        model = create_model_from_pretrained(
+        model = create_model_from_pretrained_mod(
             model_name=model_name,
             model_basedir=model_basedir,
             pretrained_model=pretrained_model,
-            patch_size=patch_size
+            n_rays=n_rays,
+            grid=grid,
+            patch_size=patch_size,
+            copy_weights=copy_weights
         )
     else:
         model = create_model_from_scratch(
             model_name=model_name,
             model_basedir=model_basedir,
-            patch_size=patch_size
+            patch_size=patch_size,
+            n_rays=n_rays
         )
 
     # Train
@@ -718,7 +821,7 @@ def run_training_pipeline(data_dir: str,
     print("\n" + "=" * 70)
     print("TRAINING COMPLETE!")
     print("=" * 70)
-    print(f"\n✅ Model saved to: {model_dir}")
+    print(f"\n Model saved to: {model_dir}")
     print("\nModel files:")
 
     if os.path.exists(model_dir):

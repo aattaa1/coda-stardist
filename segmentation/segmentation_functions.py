@@ -1,20 +1,14 @@
-"""
-StarDist WSI Segmentation Pipeline - Functions Module
-=====================================================
-Contains all functions for segmentation, feature extraction, and file I/O.
-
-Author: Ali Attaa
-Date: 02/04/2026
-"""
 
 import os
 import gc
 import cv2
+import orjson
 import json
 import time
 import pickle
 import geojson
 import numpy as np
+import openslide
 import pandas as pd
 import tensorflow as tf
 from PIL import Image
@@ -26,7 +20,6 @@ from scipy.io import savemat, loadmat
 from openslide import OpenSlide
 from skimage.transform import rescale
 from stardist.models import StarDist2D, Config2D
-
 Image.MAX_IMAGE_PIXELS = None
 
 
@@ -46,7 +39,6 @@ def setup_gpu_environment(conda_env_path: str = None) -> None:
         if os.path.exists(cuda_bin_path):
             os.environ['PATH'] = cuda_bin_path + os.pathsep + os.environ.get('PATH', '')
 
-
 def check_gpu() -> bool:
     """
     Check for available GPU and configure memory growth.
@@ -61,17 +53,17 @@ def check_gpu() -> bool:
     gpus = tf.config.list_physical_devices('GPU')
 
     if gpus:
-        print(f"✅ Found {len(gpus)} GPU(s):")
+        print(f" Found {len(gpus)} GPU(s):")
         for i, gpu in enumerate(gpus):
             print(f"   GPU {i}: {gpu.name}")
         try:
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
-            print("✅ Memory growth enabled")
+            print(" Memory growth enabled")
         except RuntimeError as e:
-            print(f"⚠️ Could not set memory growth: {e}")
+            print(f" Could not set memory growth: {e}")
     else:
-        print("❌ No GPU found - using CPU")
+        print(" No GPU found - using CPU")
 
     print("=" * 60)
     return len(gpus) > 0
@@ -181,48 +173,10 @@ def load_model(model_path: str) -> StarDist2D:
     model.thresholds = thresh
     print(f"  Thresholds: {model.thresholds}")
     model.load_weights(weights_path)
-    print("  ✅ Model loaded successfully!")
+    print("   Model loaded successfully!")
 
     return model
 
-
-# ============================================================
-# PIXEL RESOLUTION
-# ============================================================
-
-def extract_and_save_pixel_sizes(wsi_dir: str, output_dir: str,
-                                 wsi_extensions: Tuple[str, ...] = ('.ndpi', '.svs')) -> None:
-    """
-    Extract pixel sizes from WSI files and save as .mat files.
-
-    Args:
-        wsi_dir: Directory containing WSI files
-        output_dir: Directory to save .mat files
-        wsi_extensions: Tuple of valid WSI extensions
-    """
-    os.makedirs(output_dir, exist_ok=True)
-
-    wsi_files = [f for f in os.listdir(wsi_dir) if f.endswith(wsi_extensions)]
-
-    for filename in sorted(wsi_files):
-        mat_path = os.path.join(output_dir, f"{os.path.splitext(filename)[0]}.mat")
-
-        if os.path.exists(mat_path):
-            continue
-
-        wsi_path = os.path.join(wsi_dir, filename)
-        print(f"  Extracting pixel resolution: {filename}")
-
-        try:
-            slide = OpenSlide(wsi_path)
-            pix_res = {
-                'x': slide.properties.get('openslide.mpp-x', '0'),
-                'y': slide.properties.get('openslide.mpp-y', '0')
-            }
-            slide.close()
-            savemat(mat_path, {'pix_res': pix_res})
-        except Exception as e:
-            print(f"    ⚠️ Could not extract pixel resolution: {e}")
 
 
 # ============================================================
@@ -348,8 +302,8 @@ def save_geojson_from_polys(polys: Dict, output_path: str, name: str,
         })
 
     geojson_path = os.path.join(output_path, f"{name}.geojson")
-    with open(geojson_path, 'w') as f:
-        geojson.dump(geo_data, f)
+    with open(geojson_path, 'wb') as f:
+        f.write(orjson.dumps(geo_data))
 
     print(f"  Saved GeoJSON: {name}.geojson ({len(geo_data)} nuclei)")
     return geojson_path
@@ -441,20 +395,11 @@ def get_rgb_avg_std(centroid: List[int], contour: np.ndarray,
 # FEATURE EXTRACTION
 # ============================================================
 
-def extract_features_from_polys(polys: Dict, wsi_path: str,
-                                extract_rgb: bool = True,
-                                rgb_offset: int = 30) -> pd.DataFrame:
+def extract_features_from_polys_fast(polys: Dict, wsi_path: str,
+                                     extract_rgb: bool = True,
+                                     rgb_offset: int = 30) -> pd.DataFrame:
     """
-    Extract nuclear features directly from StarDist prediction output.
-
-    Args:
-        polys: Dictionary with 'coord' and 'points' from prediction
-        wsi_path: Path to WSI for RGB extraction
-        extract_rgb: Whether to extract RGB features
-        rgb_offset: Radius for RGB extraction region
-
-    Returns:
-        DataFrame with nuclear features
+    Extract nuclear features - OPTIMIZED VERSION using vectorized operations.
     """
     coords = polys['coord']
     points = polys['points']
@@ -462,90 +407,138 @@ def extract_features_from_polys(polys: Dict, wsi_path: str,
     if len(points) == 0:
         return pd.DataFrame()
 
+    num_nuclei = len(points)
     nm = os.path.splitext(os.path.basename(wsi_path))[0]
 
-    # Load WSI for RGB extraction if needed
+    print(f"    Extracting features for {num_nuclei:,} nuclei...")
+
+    # Pre-allocate numpy arrays (much faster than lists)
+    centroids_x = np.zeros(num_nuclei, dtype=np.float32)
+    centroids_y = np.zeros(num_nuclei, dtype=np.float32)
+    areas = np.zeros(num_nuclei, dtype=np.float32)
+    perimeters = np.zeros(num_nuclei, dtype=np.float32)
+    circularities = np.zeros(num_nuclei, dtype=np.float32)
+    aspect_ratios = np.zeros(num_nuclei, dtype=np.float32)
+    compactness_a = np.zeros(num_nuclei, dtype=np.float32)
+    eccentricity_a = np.zeros(num_nuclei, dtype=np.float32)
+    extent_a = np.zeros(num_nuclei, dtype=np.float32)
+    form_factor_a = np.zeros(num_nuclei, dtype=np.float32)
+    maximum_radius_a = np.zeros(num_nuclei, dtype=np.float32)
+    mean_radius_a = np.zeros(num_nuclei, dtype=np.float32)
+    median_radius_a = np.zeros(num_nuclei, dtype=np.float32)
+    minor_axis_length_a = np.zeros(num_nuclei, dtype=np.float32)
+    major_axis_length_a = np.zeros(num_nuclei, dtype=np.float32)
+    orientation_degrees_a = np.zeros(num_nuclei, dtype=np.float32)
+    solidity_a = np.zeros(num_nuclei, dtype=np.float32)
+    convex_area_a = np.zeros(num_nuclei, dtype=np.float32)
+    equiv_diameter_a = np.zeros(num_nuclei, dtype=np.float32)
+
+    if extract_rgb:
+        r_avg_arr = np.zeros(num_nuclei, dtype=np.float32)
+        g_avg_arr = np.zeros(num_nuclei, dtype=np.float32)
+        b_avg_arr = np.zeros(num_nuclei, dtype=np.float32)
+        r_std_arr = np.zeros(num_nuclei, dtype=np.float32)
+        g_std_arr = np.zeros(num_nuclei, dtype=np.float32)
+        b_std_arr = np.zeros(num_nuclei, dtype=np.float32)
+
+    # get pixel resolution
+    slide = OpenSlide(wsi_path)
+    pix_res = {
+        'x': slide.properties.get('openslide.mpp-x', '0'),
+        'y': slide.properties.get('openslide.mpp-y', '0')
+    }
+    slide.close()
+
+    # Load WSI once
     wsi_image = None
     if extract_rgb:
         print(f"    Loading WSI for RGB extraction...")
         wsi_image = imread(wsi_path)
 
-    # Initialize feature lists
-    centroids_x, centroids_y = [], []
-    areas, perimeters, circularities, aspect_ratios = [], [], [], []
-    compactness_a, eccentricity_a, extent_a, form_factor_a = [], [], [], []
-    maximum_radius_a, mean_radius_a, median_radius_a = [], [], []
-    minor_axis_length_a, major_axis_length_a, orientation_degrees_a = [], [], []
-    solidity_a, convex_area_a, equiv_diameter_a = [], [], []
-    r_avg_list, g_avg_list, b_avg_list = [], [], []
-    r_std_list, g_std_list, b_std_list = [], [], []
+    # Process in batches with progress
+    batch_size = 5000
 
-    for j in tqdm(range(len(points)), desc="    Extracting features", leave=False):
-        point = points[j]
-        contour_raw = coords[j]
+    for batch_start in range(0, num_nuclei, batch_size):
+        batch_end = min(batch_start + batch_size, num_nuclei)
 
-        # Centroid (StarDist returns [y, x])
-        centroid = [int(point[0]), int(point[1])]
-        centroids_x.append(centroid[1])  # x
-        centroids_y.append(centroid[0])  # y
+        for j in range(batch_start, batch_end):
+            point = points[j]
+            contour_raw = coords[j]
 
-        # Convert contour for OpenCV (needs [x, y] format as int32)
-        contour = np.array([[int(xy[1]), int(xy[0])] for xy in contour_raw.T], dtype=np.int32)
+            # Centroid
+            centroid_y, centroid_x = int(point[0]), int(point[1])
+            centroids_x[j] = centroid_x
+            centroids_y[j] = centroid_y
 
-        # Shape features
-        area = cntarea(contour)
-        perimeter = cntperi(contour)
-        circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
+            # Convert contour for OpenCV
+            contour = np.array([[int(xy[1]), int(xy[0])] for xy in contour_raw.T], dtype=np.int32)
 
-        MA, ma, orientation = cntMA(contour)
-        aspect_ratio = MA / ma if ma > 0 else 1
+            # Shape features
+            area = cv2.contourArea(contour.astype(np.float32))
+            perimeter = cv2.arcLength(contour.astype(np.float32), True)
 
-        compactness = (perimeter ** 2) / area if area > 0 else 0
-        eccentricity = np.sqrt(1 - (ma / MA) ** 2) if MA > ma and MA > 0 else 0
-        extent = area / (MA * ma) if MA * ma > 0 else 0
-        form_factor = (perimeter ** 2) / (4 * np.pi * area) if area > 0 else 0
+            areas[j] = area
+            perimeters[j] = perimeter
+            circularities[j] = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
 
-        convex_area =cv2.contourArea(cv2.convexHull(contour)) if len(contour) > 3 else area
-        solidity = area / convex_area if convex_area > 0 else 0
-        equiv_diameter = np.sqrt(4 *area / np.pi) if area > 0 else 0
+            # Ellipse fitting
+            if len(contour) >= 5:
+                try:
+                    (_, _), (MA, ma), orientation = cv2.fitEllipse(contour.astype(np.float32))
+                    MA, ma = max(MA, ma), min(MA, ma)
+                except:
+                    MA, ma, orientation = 1.0, 1.0, 0.0
+            else:
+                MA, ma, orientation = 1.0, 1.0, 0.0
 
-        # Radius features
-        centroid_arr = np.array([centroid[1], centroid[0]])  # [x, y]
-        distances = np.linalg.norm(contour - centroid_arr, axis=1) if len(contour) > 0 else [0]
+            aspect_ratios[j] = MA / ma if ma > 0 else 1
+            minor_axis_length_a[j] = ma
+            major_axis_length_a[j] = MA
+            orientation_degrees_a[j] = np.degrees(orientation)
 
-        # Append shape features
-        areas.append(area)
-        perimeters.append(perimeter)
-        circularities.append(circularity)
-        aspect_ratios.append(aspect_ratio)
-        compactness_a.append(compactness)
-        eccentricity_a.append(eccentricity)
-        extent_a.append(extent)
-        form_factor_a.append(form_factor)
-        maximum_radius_a.append(np.max(distances))
-        mean_radius_a.append(np.mean(distances))
-        median_radius_a.append(np.median(distances))
-        minor_axis_length_a.append(ma)
-        major_axis_length_a.append(MA)
-        orientation_degrees_a.append(np.degrees(orientation))
-        solidity_a.append(solidity)
-        convex_area_a.append(convex_area)
-        equiv_diameter_a.append(equiv_diameter)
+            # Derived features
+            compactness_a[j] = (perimeter ** 2) / area if area > 0 else 0
+            eccentricity_a[j] = np.sqrt(1 - (ma / MA) ** 2) if MA > ma and MA > 0 else 0
+            extent_a[j] = area / (MA * ma) if MA * ma > 0 else 0
+            form_factor_a[j] = (perimeter ** 2) / (4 * np.pi * area) if area > 0 else 0
 
-        # RGB features
-        if extract_rgb and wsi_image is not None:
-            r_avg, g_avg, b_avg, r_std, g_std, b_std = get_rgb_avg_std(
-                centroid, contour, rgb_offset, wsi_image
-            )
-            r_avg_list.append(r_avg)
-            g_avg_list.append(g_avg)
-            b_avg_list.append(b_avg)
-            r_std_list.append(r_std)
-            g_std_list.append(g_std)
-            b_std_list.append(b_std)
+            # Convex hull features
+            if len(contour) >= 3:
+                convex_hull = cv2.convexHull(contour)
+                convex_area = cv2.contourArea(convex_hull.astype(np.float32))
+            else:
+                convex_area = area
 
-    # Build DataFrame
-    dat = {
+            convex_area_a[j] = convex_area
+            solidity_a[j] = area / convex_area if convex_area > 0 else 0
+            equiv_diameter_a[j] = np.sqrt(4 * area / np.pi) if area > 0 else 0
+
+            # Radius features
+            centroid_arr = np.array([centroid_x, centroid_y])
+            distances = np.linalg.norm(contour - centroid_arr, axis=1)
+            maximum_radius_a[j] = np.max(distances) if len(distances) > 0 else 0
+            mean_radius_a[j] = np.mean(distances) if len(distances) > 0 else 0
+            median_radius_a[j] = np.median(distances) if len(distances) > 0 else 0
+
+            # RGB features
+            if extract_rgb and wsi_image is not None:
+                r_avg, g_avg, b_avg, r_std, g_std, b_std = get_rgb_avg_std(
+                    [centroid_y, centroid_x], contour, rgb_offset, wsi_image
+                )
+                r_avg_arr[j] = r_avg
+                g_avg_arr[j] = g_avg
+                b_avg_arr[j] = b_avg
+                r_std_arr[j] = r_std
+                g_std_arr[j] = g_std
+                b_std_arr[j] = b_std
+
+        # Progress update
+        #progress = (batch_end / num_nuclei) * 100
+        #print(f"    Feature extraction progress: {batch_end:,}/{num_nuclei:,} ({progress:.1f}%)")
+
+    # Build DF from arrays
+    data = {
+        'label_id': np.arange(1, num_nuclei + 1, dtype=np.int32),
         'Centroid_x': centroids_x,
         'Centroid_y': centroids_y,
         'Area': areas,
@@ -565,17 +558,17 @@ def extract_features_from_polys(polys: Dict, wsi_path: str,
         'solidity': solidity_a,
         'convex_area': convex_area_a,
         'equiv_diameter': equiv_diameter_a,
-        'slide_num': [extract_slide_number(nm)] * len(points)
+        'slide_num': np.full(num_nuclei, extract_slide_number(nm), dtype=np.float32)
     }
 
-    if extract_rgb and wsi_image is not None:
-        dat.update({
-            'r_mean_intensity': r_avg_list,
-            'g_mean_intensity': g_avg_list,
-            'b_mean_intensity': b_avg_list,
-            'r_std': r_std_list,
-            'g_std': g_std_list,
-            'b_std': b_std_list
+    if extract_rgb:
+        data.update({
+            'r_mean_intensity': r_avg_arr,
+            'g_mean_intensity': g_avg_arr,
+            'b_mean_intensity': b_avg_arr,
+            'r_std': r_std_arr,
+            'g_std': g_std_arr,
+            'b_std': b_std_arr
         })
 
     # Cleanup
@@ -583,15 +576,14 @@ def extract_features_from_polys(polys: Dict, wsi_path: str,
         del wsi_image
         gc.collect()
 
-    return pd.DataFrame(dat).astype(np.float32)
-
+    return pd.DataFrame(data), pix_res
 
 # ============================================================
 # MAT FILE OUTPUT
 # ============================================================
 
 def save_features_to_mat(df: pd.DataFrame, output_path: str, name: str,
-                         pixres_dir: str = None) -> str:
+                         pix_res: dict) -> str:
     """
     Save features DataFrame to MAT file with pixel resolution.
 
@@ -599,18 +591,11 @@ def save_features_to_mat(df: pd.DataFrame, output_path: str, name: str,
         df: Features DataFrame
         output_path: Directory to save MAT file
         name: Base filename
-        pixres_dir: Directory containing pixel resolution MAT files
+        pix_res: pixel_resolution
 
     Returns:
         Path to saved MAT file
     """
-    # Load pixel resolution if available
-    pix_res = {}
-    if pixres_dir:
-        pixres_path = os.path.join(pixres_dir, f"{name}.mat")
-        if os.path.exists(pixres_path):
-            pixres_data = loadmat(pixres_path)
-            pix_res = pixres_data.get('pix_res', {})
 
     mat_data = {
         'features': df.to_numpy().astype(np.float32),
@@ -631,7 +616,8 @@ def save_features_to_mat(df: pd.DataFrame, output_path: str, name: str,
 
 def process_single_image(wsi_path: str, model: StarDist2D,
                          out_geojson: str, out_pkl: str, out_mat: str,
-                         pixres_dir: str,
+                         save_mat_file: bool = True,
+                         save_pkl_file: bool = True,
                          idx: int = 1, total: int = 1,
                          generate_geojson: bool = True,
                          geojson_every_n: int = 1,
@@ -652,7 +638,8 @@ def process_single_image(wsi_path: str, model: StarDist2D,
         out_geojson: Output directory for GeoJSON
         out_pkl: Output directory for pickle files
         out_mat: Output directory for MAT files
-        pixres_dir: Directory with pixel resolution files
+        save_mat_file: Whether to save features in a .mat file
+        save_pkl_file: Whether to save features in a .pkl file
         idx: Current index
         total: Total number of files
         generate_geojson: Whether to generate GeoJSON files
@@ -673,8 +660,9 @@ def process_single_image(wsi_path: str, model: StarDist2D,
     nm = os.path.splitext(name)[0]
 
     # Check if already processed
+    mat_path = os.path.join(out_mat, f"{nm}.mat")
     pkl_path = os.path.join(out_pkl, f"{nm}.pkl")
-    if os.path.exists(pkl_path):
+    if os.path.exists(pkl_path) or os.path.exists(mat_path):
         print(f"Skipping {nm} ({idx}/{total}) - already processed")
         return True
 
@@ -696,11 +684,12 @@ def process_single_image(wsi_path: str, model: StarDist2D,
         )
 
         if len(polys['points']) == 0:
-            print(f"  ⚠️ No nuclei detected in {nm}")
+            print(f"   No nuclei detected in {nm}")
             return True
 
         # Step 2: Save GeoJSON (if enabled and on correct interval)
-        if generate_geojson and (idx % geojson_every_n == 0):
+        # Save first image (idx=1) and then every Nth image after that
+        if generate_geojson and ((idx - 1) % geojson_every_n == 0):
             print(f"  Saving GeoJSON...")
             save_geojson_from_polys(
                 polys, out_geojson, nm,
@@ -711,23 +700,25 @@ def process_single_image(wsi_path: str, model: StarDist2D,
 
         # Step 3: Extract features
         print(f"  Extracting features...")
-        df = extract_features_from_polys(polys, wsi_path, extract_rgb)
+        df, pix_res = extract_features_from_polys_fast(polys, wsi_path, extract_rgb)
 
         if len(df) > 0:
             # Save pickle
-            df.to_pickle(pkl_path)
-            print(f"  Saved: {nm}.pkl ({len(df)} nuclei)")
+            if save_pkl_file:
+                pd.to_pickle({"df": df, "pix_res": pix_res}, pkl_path)
+                print(f"  Saved: {nm}.pkl ({len(df)} nuclei)")
 
             # Save MAT file
-            mat_path = save_features_to_mat(df, out_mat, nm, pixres_dir)
-            print(f"  Saved: {nm}.mat")
+            if save_mat_file:
+                save_features_to_mat(df, out_mat, nm, pix_res)
+                print(f"  Saved: {nm}.mat")
 
         elapsed = (time.time() - start_time) / 60
-        print(f"  ✅ Completed in {elapsed:.1f} minutes")
+        print(f"  Completed in {elapsed:.1f} minutes")
         success = True
 
     except Exception as e:
-        print(f"  ❌ ERROR: {e}")
+        print(f"  ERROR: {e}")
         import traceback
         traceback.print_exc()
 
@@ -741,10 +732,12 @@ def process_single_image(wsi_path: str, model: StarDist2D,
 # BATCH PROCESSING
 # ============================================================
 
-def process_image_directory(wsi_dir: str, model: StarDist2D,
+def process_image_directory(wsi_dir: str, model_file: str,
                             output_base: str,
                             wsi_extensions: Tuple[str, ...] = ('.ndpi', '.svs'),
                             tile_extensions: Tuple[str, ...] = ('.tif', '.tiff', '.png', '.jpg', '.jpeg'),
+                            make_mat_file: bool = True,
+                            make_pkl_file: bool = True,
                             generate_geojson: bool = True,
                             geojson_every_n: int = 50,
                             extract_rgb: bool = True,
@@ -761,10 +754,12 @@ def process_image_directory(wsi_dir: str, model: StarDist2D,
 
     Args:
         wsi_dir: Directory containing images
-        model: Loaded StarDist model
+        model_file: folder containing desired stardist model
         output_base: Base output directory
         wsi_extensions: Tuple of WSI file extensions
         tile_extensions: Tuple of tile file extensions
+        make_mat_file: true if .mat file desired
+        make_pkl_file: true if .pkl file desired
         generate_geojson: Whether to generate GeoJSON files
         geojson_every_n: Generate GeoJSON every N images
         extract_rgb: Whether to extract RGB features
@@ -780,6 +775,13 @@ def process_image_directory(wsi_dir: str, model: StarDist2D,
     Returns:
         Dictionary with processing statistics
     """
+
+    try:
+        model = load_model(model_file)
+    except Exception as e:
+        print(f" Failed to load model: {e}")
+        return
+
     print(f"\n{'=' * 70}")
     print(f"Processing directory: {wsi_dir}")
     print(f"{'=' * 70}")
@@ -788,10 +790,12 @@ def process_image_directory(wsi_dir: str, model: StarDist2D,
     out_geojson = os.path.join(output_base, 'geojsons')
     out_pkl = os.path.join(output_base, 'feature_pickles')
     out_mat = os.path.join(output_base, 'feature_mat')
-    out_pixres = os.path.join(wsi_dir, 'segmentation_analysis', 'pix_res_info')
 
-    for d in [output_base, out_geojson, out_pkl, out_mat, out_pixres]:
-        os.makedirs(d, exist_ok=True)
+    # make necessary folders
+    os.makedirs(output_base, exist_ok=True)
+    if make_mat_file: os.makedirs(out_mat, exist_ok=True)
+    if make_pkl_file: os.makedirs(out_pkl, exist_ok=True)
+    if generate_geojson: os.makedirs(out_geojson, exist_ok=True)
 
     print(f"Output directory: {output_base}")
 
@@ -806,17 +810,7 @@ def process_image_directory(wsi_dir: str, model: StarDist2D,
         print("No image files found!")
         return {'total': 0, 'processed': 0, 'skipped': 0, 'failed': 0}
 
-    # Extract pixel resolutions
-    print("\n" + "-" * 50)
-    print("Extracting pixel resolutions...")
-    print("-" * 50)
-    extract_and_save_pixel_sizes(wsi_dir, out_pixres, wsi_extensions)
-
     # Process images
-    print("\n" + "-" * 50)
-    print("Processing images...")
-    print("-" * 50)
-
     total = len(wsi_files)
     processed = 0
     skipped = 0
@@ -839,7 +833,9 @@ def process_image_directory(wsi_dir: str, model: StarDist2D,
 
         success = process_single_image(
             wsi_path, model,
-            out_geojson, out_pkl, out_mat, out_pixres,
+            out_geojson, out_pkl, out_mat,
+            save_mat_file=make_mat_file,
+            save_pkl_file=make_pkl_file,
             idx=idx, total=total,
             generate_geojson=generate_geojson,
             geojson_every_n=geojson_every_n,
@@ -865,7 +861,7 @@ def process_image_directory(wsi_dir: str, model: StarDist2D,
         'failed': failed
     }
 
-    print(f"\n✅ Completed: {wsi_dir}")
+    print(f"\n Completed: {wsi_dir}")
     print(f"   Total: {total}, Processed: {processed}, Skipped: {skipped}, Failed: {failed}")
 
     return stats
