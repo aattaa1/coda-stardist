@@ -1,31 +1,24 @@
-
 import os
 import gc
 import cv2
 import orjson
 import json
 import time
-import pickle
-import geojson
 import numpy as np
-import openslide
 import pandas as pd
 import tensorflow as tf
 from PIL import Image
-from pathlib import Path
-from typing import List, Tuple, Dict, Optional
-from tqdm import tqdm
+from typing import List, Tuple, Dict
 from tifffile import imread, imwrite
 from scipy.io import savemat, loadmat
 from openslide import OpenSlide
-from skimage.transform import rescale
 from stardist.models import StarDist2D, Config2D
+from concurrent.futures import ThreadPoolExecutor
 Image.MAX_IMAGE_PIXELS = None
 
 
-# ============================================================
 # GPU UTILITIES
-# ============================================================
+
 
 def setup_gpu_environment(conda_env_path: str = None) -> None:
     """
@@ -68,16 +61,14 @@ def check_gpu() -> bool:
     print("=" * 60)
     return len(gpus) > 0
 
-
 def clear_gpu_memory() -> None:
     """Clear TensorFlow session and run garbage collection."""
     tf.keras.backend.clear_session()
     gc.collect()
 
 
-# ============================================================
 # FILE UTILITIES
-# ============================================================
+
 
 def get_sorted_files(directory: str, *extensions, filter_str: str = None) -> List[str]:
     """
@@ -136,9 +127,9 @@ def create_output_directories(base_path: str, subdirs: List[str]) -> Dict[str, s
     return paths
 
 
-# ============================================================
+
 # MODEL LOADING
-# ============================================================
+
 
 def load_model(model_path: str) -> StarDist2D:
     """
@@ -177,7 +168,35 @@ def load_model(model_path: str) -> StarDist2D:
 
     return model
 
+def generate_tile_locations(width, height, tile_size, overlap):
+    stride = tile_size - overlap
 
+    for y in range(0, height, stride):
+        for x in range(0, width, stride):
+            w = min(tile_size, width - x)
+            h = min(tile_size, height - y)
+            yield x,y,w,h
+
+def load_tiles(slide, x, y, w ,h):
+
+    read_start = time.time()
+
+    tile = np.array(
+        slide.read_region(
+            (x,y),
+            0,
+            (w,h)
+        )
+    )[:,:,:3]
+    tile = tile.astype(np.float32) / 255.0
+    read_time = time.time() -read_start
+
+    print(
+        f"    Read tile"
+    f"x = {x:,}, y = {y:,}"
+    f"in {read_time:.2f} seconds")
+
+    return x, y, tile
 
 # ============================================================
 # SEGMENTATION
@@ -203,8 +222,20 @@ def segment_image(img_path: str, model: StarDist2D,
         Tuple of (mask, polys dictionary)
     """
     print(f"  Reading image...")
-    img = imread(img_path)
-    img = img / 255.0  # Normalize
+
+    slide = OpenSlide(img_path)
+
+    level = 0
+
+    img = np.array(
+        slide.read_region(
+            (0, 0),
+            level,
+            slide.level_dimensions[level]
+        )
+    )[:, :, :3]
+
+    img = img.astype(np.float32) / 255.0
 
     print(f"  Image shape: {img.shape}")
 
@@ -247,10 +278,179 @@ def segment_image(img_path: str, model: StarDist2D,
 
     return mask, polys
 
-
 # ============================================================
 # GEOJSON OUTPUT
 # ============================================================
+
+
+def segment_wsi_openslide(
+        wsi_path: str,
+        model,
+        tile_size: int = 4096,
+        overlap: int = 256,
+        block_size: int = 8192,
+        min_overlap: int = 128,
+        context: int = 128,
+        n_tiles=(8, 8, 1)
+):
+
+    print("  Opening WSI...")
+    slide = OpenSlide(wsi_path)
+
+    width, height = slide.dimensions
+
+    print(f"  WSI size: {width:,} x {height:,}")
+
+    all_coords = []
+    all_points = []
+
+    tile_locations = generate_tile_locations(
+        width,
+        height,
+        tile_size,
+        overlap
+    )
+
+    tile_count = 0
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+
+        try:
+            first_loc = next(tile_locations)
+        except StopIteration:
+            slide.close()
+            return {
+                "coord": [],
+                "points": np.empty((0, 2))
+            }
+
+        future = executor.submit(
+            load_tiles,
+            slide,
+            *first_loc
+        )
+
+        while future is not None:
+
+            try:
+
+                x, y, tile = future.result()
+
+                tile_count += 1
+
+                print(
+                    f"    Tile {tile_count}: "
+                    f"x={x:,}, y={y:,}, "
+                    f"w={tile.shape[1]:,}, h={tile.shape[0]:,}"
+                )
+
+                # Start loading the next tile immediately
+                try:
+                    next_loc = next(tile_locations)
+
+                    next_future = executor.submit(
+                        load_tiles,
+                        slide,
+                        *next_loc
+                    )
+
+                except StopIteration:
+                    next_future = None
+
+                if tile.shape[0] < 64 or tile.shape[1] < 64:
+                    future = next_future
+                    continue
+
+                try:
+                    seg_start = time.time()
+                    _, polys = model.predict_instances_big(
+                        tile,
+                        axes='YXC',
+                        block_size=block_size,
+                        min_overlap=min_overlap,
+                        context=context,
+                        n_tiles=n_tiles
+                    )
+
+                    seg_time = time.time() - seg_start
+
+                    print(
+                        f"      Segmentation took "
+                        f"{seg_time:.2f}s")
+
+                except Exception as e:
+
+                    print(
+                        f"      predict_instances_big failed, "
+                        f"falling back: {e}"
+                    )
+
+                    _, polys = model.predict_instances(tile)
+
+                if len(polys["points"]) > 0:
+
+                    shifted_coords = []
+
+                    for contour in polys["coord"]:
+
+                        contour = contour.copy()
+
+                        contour[0, :] += y
+                        contour[1, :] += x
+
+                        shifted_coords.append(contour)
+
+                    shifted_points = []
+
+                    for point in polys["points"]:
+
+                        point = np.array(point).copy()
+
+                        point[0] += y
+                        point[1] += x
+
+                        shifted_points.append(point)
+
+                    all_coords.extend(shifted_coords)
+                    all_points.extend(shifted_points)
+
+                del tile
+                gc.collect()
+
+                future = next_future
+
+                tile_start = time.time()
+                x, y, tile = future.result()
+
+            except Exception as e:
+
+                print(
+                    f"      Tile failed at "
+                    f"x={x}, y={y}: {e}"
+                )
+
+                future = next_future if 'next_future' in locals() else None
+
+    slide.close()
+
+    print(
+        f"  Finished segmentation: "
+        f"{len(all_points):,} nuclei detected"
+    )
+
+    total_tile_time = time.time() - tile_start
+
+    print(
+        f"      Total tile processing: "
+        f"{total_tile_time:.2f}s"
+    )
+
+    polys_out = {
+        "coord": all_coords,
+        "points": np.array(all_points)
+    }
+
+    return polys_out
 
 def save_geojson_from_polys(polys: Dict, output_path: str, name: str,
                             ds_amt: float = 1.0,
@@ -453,7 +653,7 @@ def extract_features_from_polys_fast(polys: Dict, wsi_path: str,
     wsi_image = None
     if extract_rgb:
         print(f"    Loading WSI for RGB extraction...")
-        wsi_image = imread(wsi_path)
+        wsi_image = OpenSlide(wsi_path)
 
     # Process in batches with progress
     batch_size = 5000
@@ -675,13 +875,29 @@ def process_single_image(wsi_path: str, model: StarDist2D,
 
     try:
         # Step 1: Segment
-        mask, polys = segment_image(
-            wsi_path, model,
-            block_size=block_size,
-            min_overlap=min_overlap,
-            context=context,
-            n_tiles=n_tiles
-        )
+        if wsi_path.lower().endswith(('.svs', '.ndpi', '.scn')):
+
+            polys = segment_wsi_openslide(
+                wsi_path,
+                model,
+                tile_size=4096,
+                overlap=256,
+                block_size=block_size,
+                min_overlap=min_overlap,
+                context=context,
+                n_tiles=n_tiles
+            )
+
+        else:
+
+            _, polys = segment_image(
+                wsi_path,
+                model,
+                block_size=block_size,
+                min_overlap=min_overlap,
+                context=context,
+                n_tiles=n_tiles
+            )
 
         if len(polys['points']) == 0:
             print(f"   No nuclei detected in {nm}")
