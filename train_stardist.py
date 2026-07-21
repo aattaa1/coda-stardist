@@ -33,11 +33,11 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 CONDA_ENV_PATH = r"C:\Users\aattaa1\AppData\Local\miniconda3\envs\coda-stardist"
 
 # Training data directory
-DATA_DIR = r"Z:\Yu Shen\Wen-Chen Chen\nuclear segmentation\qupath annotations from AK\Qupath project\ground_truth"
+DATA_DIR = r""
 
 # Model output settings
-MODEL_NAME = "wcc_02_24_2026_96_nrays"
-MODEL_BASEDIR = r"\\10.99.134.183\kiemen-lab-data\Ali Attaa\nuclear segmentation\stardist models"
+MODEL_NAME = ""
+MODEL_BASEDIR = r""
 
 # Data settings
 IMG_EXT = ".tif"

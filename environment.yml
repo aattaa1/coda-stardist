@@ -47,6 +47,7 @@ dependencies:
       # GeoJSON and geometry
       - geojson>=3.0.0
       - shapely>=2.0.0
+      - orjson
       
       # Visualization
       - matplotlib>=3.7.0
